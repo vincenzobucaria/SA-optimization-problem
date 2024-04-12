@@ -9,16 +9,21 @@ Università degli Studi di Messina
 
 work in progress
 
-last update 10/04/2024
+update 10/04/2024
 
 
 - aggiunto il sistema a punti anche per il collegamento tra power nodes
 - risolto il problema per cui potevano essere generati dei loop o avere soluzioni con grafi non connessi
 - sistemati i parametri per il sistema a punti dei nodi constrained
 
+update 12/04/2024
+
+
+- trovato un metodo migliore basato sull'algoritmo di Kruskal per la generazione della soluzione iniziale
+
 """
 
-
+from networkx.algorithms import approximation
 import networkx as nx
 import matplotlib.pyplot as plt
 from itertools import combinations
@@ -44,15 +49,21 @@ show_graphs = True
 
 
 def generate_initial_graph(constrained_nodes, mandatory_power_nodes, discretionary_power_nodes):
-    print("DEBUG: generazione grafo", constrained_nodes, mandatory_power_nodes, discretionary_power_nodes)
+    #print("DEBUG: generazione grafo", constrained_nodes, mandatory_power_nodes, discretionary_power_nodes)
+    
+    #E' utile farsi restituire un grafo dove i nodi constrained non sono direttamente connessi tra loro
     
     G = nx.Graph()
+    G_edit = nx.Graph()
     all_nodes=[]
     
     if (constrained_nodes is not None) and (mandatory_power_nodes is not None) and (discretionary_power_nodes is not None):
         G.add_nodes_from(constrained_nodes, node_type='constrained')
         G.add_nodes_from(mandatory_power_nodes, node_type='power_mandatory')
         G.add_nodes_from(discretionary_power_nodes, node_type='power_discretionary')
+        G_edit.add_nodes_from(constrained_nodes, node_type='constrained')
+        G_edit.add_nodes_from(mandatory_power_nodes, node_type='power_mandatory')
+        G_edit.add_nodes_from(discretionary_power_nodes, node_type='power_discretionary')
         all_nodes = list(constrained_nodes) + list(mandatory_power_nodes) + list(discretionary_power_nodes)
     elif (constrained_nodes is not None) and (mandatory_power_nodes is not None):
         G.add_nodes_from(constrained_nodes, node_type='weak')
@@ -72,10 +83,17 @@ def generate_initial_graph(constrained_nodes, mandatory_power_nodes, discretiona
     for i in all_nodes:
         for j in all_nodes:
             if i != j and not G.has_edge(i, j):
+                type_of_node_i = G_edit.nodes[i]["node_type"]
+                type_of_node_j = G_edit.nodes[j]["node_type"]
                 # Assign a random weight between 10 and 80 (ms) (you can customize the range)
-                weight = random.randint(10, 80)
+                weight = random.randint(5, 60)
                 G.add_edge(i, j, latency=weight)
-    return G
+                
+                if (type_of_node_i is "constrained") and (type_of_node_j is "constrained"):
+                    pass
+                else:
+                    G_edit.add_edge(i, j, latency=weight)    
+    return G, G_edit
 
     
 def draw_graph(G):
@@ -98,7 +116,7 @@ def draw_graph(G):
 
 
 
-def generate_greedy_initial_solution(graph, constrained_nodes, power_nodes):
+def generate_custom_initial_solution(graph, constrained_nodes, power_nodes):
     
     initial_solution_graph = nx.Graph()
 
@@ -136,15 +154,15 @@ def generate_greedy_initial_solution(graph, constrained_nodes, power_nodes):
 
                 #Più è bassa la latenza diretta tra il nodo constrained e il power node e più alto sarà il punteggio
                 
-                direct_latency_score = 60/(edge_latency)
+                direct_latency_score = 100/(edge_latency)
 
                 #Se ci sono già altri nodi constrained (nel limite della capacity) il punteggio può aumentare perchè possiamo diminuire il numero di hop
 
-                neighbours_quantity_score = 0.2*number_of_constrained_neighbours
+                neighbours_quantity_score = 0*number_of_constrained_neighbours
 
                 #Se la latenza dei nodi constrained affenti al power node è bassa il punteggio può aumentare
                 if number_of_constrained_neighbours>1:
-                    neighbours_latency_score = 10/(neighbours_average_latency)
+                    neighbours_latency_score = 0/(neighbours_average_latency)
                 else:
                     neighbours_latency_score = 0
                 
@@ -257,24 +275,206 @@ def generate_greedy_initial_solution(graph, constrained_nodes, power_nodes):
         
         print("fatto")
     
+    def greedy_connect_power_nodes():   
+
+        
+       
+
+
+        processed_power_nodes = list()
+
+        for first_power_node in power_nodes:
+            
+            
+            #Questo non funziona in quanto non abbiamo nessuna garanzia che il grafo sia connesso!
+            # ci devo lavorare
+            
+
+            minimum_latency = 10000 #as like as infinite
+            type_of_first_power_node = graph.nodes[first_power_node]["node_type"]
+
+            
+            add_to_graph = 0
+            
+            for second_power_node in power_nodes:
+                if second_power_node != first_power_node:
+                    edge_latency = graph[first_power_node][second_power_node]["latency"]
+                
+                    
+                    if (second_power_node not in processed_power_nodes):
+
+                        
+                       
+                        
+
+                        
+                        
+                        if edge_latency < minimum_latency:
+                            best_power_node = second_power_node
+                            type_of_second_power_node = graph.nodes[best_power_node]["node_type"]
+                            minimum_latency = edge_latency
+                            add_to_graph = 1
+            processed_power_nodes.append(first_power_node)
+            print("best node ", best_power_node)        
+            if add_to_graph:
+                initial_solution_graph.add_node(first_power_node, node_type=type_of_first_power_node)
+                initial_solution_graph.add_node(best_power_node, node_type=type_of_second_power_node)
+                initial_solution_graph.add_edge(first_power_node, best_power_node, latency=minimum_latency)
     
+    
+    def kruskal_connect_power_nodes():
+        
+        #Step 1: ottenere la lista degli archi e ordinarli in senso crescente di latenza
+        
+        #1.A: ottenere la lista di tutti gli archi e rispettive latenze
+        
+        processed_nodes = list()
+        edges_list = list()
+        
+        for first_power_node in power_nodes:
+            for second_power_node in power_nodes:
+                
+                if first_power_node!=second_power_node:
+                    if second_power_node not in processed_nodes:
+                        edge_latency = graph[first_power_node][second_power_node]["latency"]
+                        edges_list.append((first_power_node, second_power_node, edge_latency))
+            processed_nodes.append(first_power_node)
+        
+        
+        #1:B: ordinare la lista
+        
+        
+        edges_list.sort(key=lambda a: a[2])
+
+        #print(edges_list)
+        
+        
+        for edges in edges_list:
+            
+            first_power_node = edges[0]
+            second_power_node = edges[1]
+            edge_latency = edges[2]
+            
+            if first_power_node not in initial_solution_graph.nodes():
+                type_of_power_node = graph.nodes[first_power_node]["node_type"]
+                initial_solution_graph.add_node(first_power_node, node_type=type_of_power_node)
+            if second_power_node not in initial_solution_graph.nodes():
+                type_of_power_node = graph.nodes[second_power_node]["node_type"]
+                initial_solution_graph.add_node(second_power_node, node_type=type_of_power_node)
+
+            initial_solution_graph.add_edge(first_power_node, second_power_node, latency=edge_latency)
+            
+            cycles = list(nx.simple_cycles(initial_solution_graph))
+            #print(cycles)
+            if(len(cycles)>0):
+                initial_solution_graph.remove_edge(first_power_node, second_power_node)
+            
     
     initial_solution_graph = connect_constrained_nodes()
-    connect_power_nodes()
-
+    #greedy_connect_power_nodes()
+    kruskal_connect_power_nodes()
 
 
             
     return initial_solution_graph
 
 
+def generate_initial_greedy_solution(graph, constrained_nodes, power_nodes):
+    
+    initial_solution_graph = nx.Graph()
+    
+    def connect_constrained_nodes():
 
 
-def is_graph_connected():
     
-    #restituisce true se il grafo è connesso, viceversa false
+        for constrained_node in constrained_nodes:
+        
+            minimum_latency = 10000 #as like as infinite
+            
+
+            for power_node in power_nodes:
+
+                edge_latency = graph[constrained_node][power_node]["latency"]
+                
+        
+                if(edge_latency<minimum_latency):
+                    best_power_node = power_node
+                    minimum_latency = edge_latency
+                    type_of_power_node = graph.nodes[best_power_node]["node_type"]
+                        
+                    
+
+            #print("the best power node for node", constrained_node, "is the",type_of_power_node, "node", best_power_node, "which minimum latency is", minimum_latency, "ms")
+            
+            
+            initial_solution_graph.add_node(constrained_node, node_type="constrained")
+            initial_solution_graph.add_node(best_power_node, node_type=type_of_power_node)
+            initial_solution_graph.add_edge(constrained_node, best_power_node, latency=minimum_latency)
+
+        return initial_solution_graph
+            
+        #Mediante la relazione utilizzata si tenta di cercare un compromesso tra
+        
+        # La miglior latenza tra il nodo constrained e il suo nodo power afferente
+        # Il maggior numero di altri nodi constrained contattabili direttamente per mezzo del power node
+        # Latenza media dei link gestiti dal power node 
+        
+        # In questo modo è possibile minimizzare il numero di hop
     
-    pass
+    def connect_power_nodes():   
+
+        
+       
+
+
+        processed_power_nodes = list()
+
+        for first_power_node in power_nodes:
+            
+            
+            #Questo non funziona in quanto non abbiamo nessuna garanzia che il grafo sia connesso!
+            # ci devo lavorare
+            
+
+            minimum_latency = 10000 #as like as infinite
+            type_of_first_power_node = graph.nodes[first_power_node]["node_type"]
+
+            
+            add_to_graph = 0
+            
+            for second_power_node in power_nodes:
+                if second_power_node != first_power_node:
+                    edge_latency = graph[first_power_node][second_power_node]["latency"]
+                
+                    
+                    if (second_power_node not in processed_power_nodes):
+
+                        
+                       
+                        
+
+                        
+                        
+                        if edge_latency < minimum_latency:
+                            best_power_node = second_power_node
+                            type_of_second_power_node = graph.nodes[best_power_node]["node_type"]
+                            minimum_latency = edge_latency
+                            add_to_graph = 1
+            processed_power_nodes.append(first_power_node)
+            #print("best node ", best_power_node)        
+            if add_to_graph:
+                initial_solution_graph.add_node(first_power_node, node_type=type_of_first_power_node)
+                initial_solution_graph.add_node(best_power_node, node_type=type_of_second_power_node)
+                initial_solution_graph.add_edge(first_power_node, best_power_node, latency=minimum_latency)
+        
+        
+    
+    initial_solution_graph = connect_constrained_nodes()
+    connect_power_nodes()
+    return initial_solution_graph
+
+
+
 
 
 
@@ -289,6 +489,7 @@ def is_graph_connected():
 
 
 initial_T = 100 #to be defined
+
 max_iterations_number = 100 #to be defined ...
 
 # ... work in progress
@@ -301,7 +502,7 @@ max_iterations_number = 100 #to be defined ...
 # _____________________ editable network parameters  ____________________________
 
 
-total_nodes_quantity = 20  #Total quantity of nodes composing the graph. At the moment for test purpose let this quantity be 10
+total_nodes_quantity = 100 #Total quantity of nodes composing the graph. At the moment for test purpose let this quantity be 10
 constrained_nodes_quantity = int(0.7*total_nodes_quantity)      #Total quantity of constrained nodes, all of them must be connected in the graph with just 1 arc for node.
 mandatory_power_nodes_quantity = int(0.2*(total_nodes_quantity))   #Quantity of mandatory nodes: that is, they must be included in the graph and each of them can have more then 1 arc.
 discretionary_power_nodes_quantity = total_nodes_quantity-constrained_nodes_quantity-mandatory_power_nodes_quantity #Quantity of power nodes that can be used for getting a better spanning tree but are not mandatory
@@ -330,18 +531,16 @@ print(discretionary_power_nodes)
 
 
 
-initial_graph = generate_initial_graph(constrained_nodes, mandatory_power_nodes, discretionary_power_nodes)
-draw_graph(initial_graph)
-initial_solution_graph = generate_greedy_initial_solution(initial_graph, constrained_nodes, power_nodes)
-draw_graph(initial_solution_graph)
-
-
-
-
-
-
-
-
+network_graph, edited_network_graph = generate_initial_graph(constrained_nodes, mandatory_power_nodes, discretionary_power_nodes)
+#draw_graph(edited_network_graph)
+initial_custom_solution_graph = generate_custom_initial_solution(network_graph, constrained_nodes, power_nodes)
+draw_graph(initial_custom_solution_graph)
+initial_greedy_solution_graph = generate_initial_greedy_solution(network_graph, constrained_nodes, power_nodes)
+draw_graph(initial_greedy_solution_graph)
+average_greedy_solution_latency = nx.average_shortest_path_length(initial_greedy_solution_graph, weight="latency")
+average_custom_solution_latency = nx.average_shortest_path_length(initial_custom_solution_graph, weight="latency")
+print("Average latency of greedy solution:", average_greedy_solution_latency)
+print("Average latency of custom solution:", average_custom_solution_latency)
 
 
 
