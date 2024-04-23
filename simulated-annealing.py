@@ -51,7 +51,7 @@ import math
 
 # _________________________ DEBUG SETTINGS ______________________________
 
-debug = True
+debug = False
 general_debug = True
 save_graphs = True 
 show_graphs = True 
@@ -123,7 +123,7 @@ def draw_graph(G):
     plt.clf()
     global count_picture
     
-    print("\tnodes_", G.nodes(), " edges:", G.edges)
+    #print("\tnodes_", G.nodes(), " edges:", G.edges)
     pos = nx.spring_layout(G)
     node_colors = {'constrained': 'green', 'power_mandatory': 'red', 'power_discretionary': 'orange'}
     colors = [node_colors[data['node_type']] for _, data in G.nodes(data=True)]
@@ -220,6 +220,8 @@ def connect_power_nodes(graph, initial_solution_graph, power_nodes):
                 else:
                    sorted_edges_list.append((second_power_node, first_power_node))
             
+        
+       
         return initial_solution_graph, sorted_edges_list
 
 def generate_initial_solution(graph, constrained_nodes, power_nodes):
@@ -247,7 +249,8 @@ def calculate_aoc(graph):
 
 def calculate_acc(graph):
     average_latency = nx.average_shortest_path_length(graph, weight="latency")
-    print("average latency: ", average_latency)
+    if(debug):
+        print("average latency: ", average_latency)
     #calcolo della latenza massima
     
     max_latency = 40
@@ -256,18 +259,26 @@ def calculate_acc(graph):
 
     return acc
 
-def eliminate_discretionary_power_node(network_graph, graph, power_nodes, discretionary_power_nodes, power_nodes_edges):
 
-    quantity_of_discretionary_power_nodes = len(discretionary_power_nodes)
-    if(len(discretionary_power_nodes)>1):
+
+def eliminate_discretionary_power_node(network_graph, graph, power_nodes, discretionary_power_nodes, power_nodes_edges, eliminated_discretionary_power_nodes):
+
+    power_nodes_copy = power_nodes
+    discretionary_power_nodes_copy = discretionary_power_nodes
+    power_nodes_edges_copy = power_nodes_edges
+    eliminated_discretionary_power_nodes_copy = eliminated_discretionary_power_nodes
+    
+    if(len(discretionary_power_nodes)>0):
         selected_discretionary_power_node = random.choice(discretionary_power_nodes)
     else:
-        return graph, power_nodes, discretionary_power_nodes, power_nodes_edges
+        return graph, power_nodes, discretionary_power_nodes, power_nodes_edges, eliminated_discretionary_power_nodes
 
     if debug:
         print("randomly selected discretionary power node ", selected_discretionary_power_node)
+        print("other discretionary: ", discretionary_power_nodes)
+        print("other power: ", power_nodes)
     
-    neighbors = list(graph.neighbors(selected_discretionary_power_node))
+    #print(list(graph.neighbors(selected_discretionary_power_node)))
 
     #Se il discretionary power node non ha foglie ed è connesso al più ad un solo power node (discretionary o mandatory)
     #è possibile eliminarlo in maniera semplice (o forse converrebbe non eliminarlo).
@@ -279,6 +290,7 @@ def eliminate_discretionary_power_node(network_graph, graph, power_nodes, discre
 
     for neighbor in neighbors:
         type_of_node = graph.nodes[neighbor]["node_type"]
+        graph.nodes[neighbor]["links"]=graph.nodes[neighbor]["links"]-1
         if(type_of_node == "constrained"):
             linked_constrained_nodes.append(neighbor)
         else:
@@ -293,23 +305,27 @@ def eliminate_discretionary_power_node(network_graph, graph, power_nodes, discre
         return
         #Non ha senso eliminare un nodo foglia, potrebbe essere utile in un'iterazione successiva
     
+  
     graph.remove_edges_from(power_nodes_edges)
     graph.remove_node(selected_discretionary_power_node)
-    power_nodes.remove(selected_discretionary_power_node)
-    discretionary_power_nodes.remove(selected_discretionary_power_node)
-    processed_graph = connect_constrained_nodes(network_graph, graph, power_nodes, linked_constrained_nodes)
-    processed_graph, power_nodes_edges = connect_power_nodes(network_graph, processed_graph, power_nodes)
-    return graph, power_nodes, discretionary_power_nodes, power_nodes_edges
+    power_nodes_copy.remove(selected_discretionary_power_node)
+    eliminated_discretionary_power_nodes_copy.append(selected_discretionary_power_node)
+    discretionary_power_nodes_copy.remove(selected_discretionary_power_node)
+    graph = connect_constrained_nodes(network_graph, graph, power_nodes, linked_constrained_nodes)
+    graph, power_nodes_edges_copy = connect_power_nodes(network_graph, graph, power_nodes)
+
+    return graph, power_nodes_copy, discretionary_power_nodes_copy, power_nodes_edges_copy, eliminated_discretionary_power_nodes_copy
     
     
     
     #I nodi constrained connessi al power node devono essere spostati su un altro power node. Scelgo di collegarli al power node più vicino
 
-def change_reference_power_node(network_graph, graph, power_nodes, constrained_nodes):
+def change_reference_power_node(network_graph, graph, power_nodes, power_nodes_edges, discretionary_power_nodes, eliminated_discretionary_power_nodes, constrained_nodes):
     
     #Estraggo randomicamente la quantità di nodi constrained da sollecitare
     number_of_constrained_nodes_to_edit = int(random.randint(1, int(len(constrained_nodes)/10)))
-    print("number of constrained nodes to edit: ", number_of_constrained_nodes_to_edit)
+    if debug:
+        print("number of constrained nodes to edit: ", number_of_constrained_nodes_to_edit)
     
     
     #Seleziono randomicamente i nodi constrained da sollecitare e li metto in una lista
@@ -327,58 +343,98 @@ def change_reference_power_node(network_graph, graph, power_nodes, constrained_n
     for constrained in constrained_nodes_to_edit:
         previous_power_node = graph.nodes[constrained]["power_node"]
         graph.remove_edge(constrained, previous_power_node)
-        random_power_node = random.choice(power_nodes)
+        graph.nodes[previous_power_node]["links"] = graph.nodes[previous_power_node]["links"] - 1
+        choice = random.randrange(2) 
+        if(choice == 0 and len(eliminated_discretionary_power_nodes)>0):
+            #print("adding discretionary")
+            random_power_node = random.choice(eliminated_discretionary_power_nodes)
+            eliminated_discretionary_power_nodes.remove(random_power_node)
+            power_nodes.append(random_power_node)
+            discretionary_power_nodes.append(random_power_node)
+            graph, power_nodes_edges = connect_power_nodes(network_graph, graph, power_nodes)
+        else:
+            random_power_node = random.choice(power_nodes)
         edge_latency = network_graph[constrained_node][random_power_node]["latency"]
         graph.add_edge(constrained, random_power_node, latency=edge_latency)
+        graph.nodes[random_power_node]["links"] = graph.nodes[random_power_node]["links"] +1 
         graph.nodes[constrained]["power_node"] = random_power_node
-        print("constrained ", constrained_node, "was previously connected to power node", previous_power_node, "now is connected to ", random_power_node)
+        if(debug):
+            print("constrained ", constrained_node, "was previously connected to power node", previous_power_node, "now is connected to ", random_power_node)
      
         
         
 
-    return graph
+    return graph, power_nodes, power_nodes_edges, discretionary_power_nodes, eliminated_discretionary_power_nodes
 
 def simulated_annealing(network_graph, initial_solution_graph, constrained_nodes, power_nodes, discretionary_power_nodes, power_nodes_edges, initial_temperature=10, minimum_temperature=0.0001, max_iterations=1000):
-    k = 0.2
+    k = 0.0001
     sa_solution_graph = initial_solution_graph
     temporary_graph = initial_solution_graph
     temperature = initial_temperature
+    temp_eliminated_discretionary_power_nodes = []
+    eliminated_discretionary_power_nodes = []
     solution_energy = calculate_acc(sa_solution_graph)+calculate_aoc(sa_solution_graph)
-    print("Initial energy: ", solution_energy)
+    if(debug):
+        print("Initial energy: ", solution_energy)
     temp_power_nodes_edges = power_nodes_edges
     temp_power_nodes = power_nodes
     temp_discretionary_power_nodes = discretionary_power_nodes
     while(temperature > minimum_temperature):
         
         move = random.randrange(2)
-        print(move)
-        if(move == 0):
-            temporary_graph, temp_power_nodes, temp_discretionary_power_nodes, temp_power_nodes_edges = eliminate_discretionary_power_node(network_graph, sa_solution_graph, power_nodes, discretionary_power_nodes, power_nodes_edges)
-        elif(move == 1):
-            temporary_graph = change_reference_power_node(network_graph, sa_solution_graph, power_nodes, constrained_nodes)
+        if(debug):
+            print(move)
+            
+        sa_solution_graph_copy = copy.deepcopy(sa_solution_graph)    
+        power_nodes_copy = power_nodes[:]
+        power_nodes_edges_copy = power_nodes_edges[:]
+        discretionary_power_nodes_copy = discretionary_power_nodes[:]
+        eliminated_discretionary_power_nodes_copy = eliminated_discretionary_power_nodes[:]
         
-        iteration_energy = calculate_acc(temporary_graph)+calculate_aoc(temporary_graph)
-        print("iteration energy", iteration_energy, "best energy ", solution_energy)
+            
+        if(move == 0):
+            #print("pmode prima: ", power_nodes)
+            #print("dis prima: ", discretionary_power_nodes)
+            temporary_graph, temp_power_nodes, temp_discretionary_power_nodes, temp_power_nodes_edges, temp_eliminated_discretionary_power_nodes = eliminate_discretionary_power_node(network_graph, sa_solution_graph_copy, power_nodes_copy, discretionary_power_nodes_copy, power_nodes_edges_copy, eliminated_discretionary_power_nodes_copy)
+            #print("pnode dopo: ", power_nodes)
+           # print("dis dopo ", discretionary_power_nodes)
+        elif(move == 1):
+            temporary_graph, temp_power_nodes, temp_power_nodes_edges, temp_discretionary_power_nodes, temp_eliminated_discretionary_power_nodes = change_reference_power_node(network_graph, sa_solution_graph_copy, power_nodes_copy, power_nodes_edges_copy, discretionary_power_nodes_copy, eliminated_discretionary_power_nodes_copy, constrained_nodes)
+        iteration_energy = calculate_acc(temporary_graph)+calculate_aoc(temporary_graph)                                            
+        if(debug):
+            print("iteration energy", iteration_energy, "best energy ", solution_energy)
         delta_energy = (iteration_energy-solution_energy)
-        print("delta energy: ", delta_energy)
+        if(debug):
+            print("delta energy: ", delta_energy)
         if(delta_energy < 0):
             sa_solution_graph = temporary_graph
             solution_energy = iteration_energy
-            print("DEBUG: negative delta energy")
+            if(debug):
+                print("DEBUG: negative delta energy")
             power_nodes_edges = temp_power_nodes_edges
             power_nodes = temp_power_nodes
             discretionary_power_nodes = temp_discretionary_power_nodes
+            eliminated_discretionary_power_nodes = temp_eliminated_discretionary_power_nodes
         else:
-            random_factor = random.uniform(0, 1)
-            print("DEBUG: positive delta energy, random factor", random_factor)
+            random_factor = random.uniform(0.1, 1)
+            if(debug):
+                print("DEBUG: positive delta energy, random factor", random_factor)
+                print("DEBUGA: ", power_nodes)
             if random_factor<math.exp(-delta_energy/(k*temperature)):                                                
-                print("randomly accepted new solution, ", random_factor, "<",math.exp(-delta_energy/(k*temperature)))
+                if(debug):
+                    print("randomly accepted new solution, ", random_factor, "<",math.exp(-delta_energy/(k*temperature)))
                 sa_solution_graph = temporary_graph
                 solution_energy = iteration_energy
                 power_nodes_edges = temp_power_nodes_edges
                 power_nodes = temp_power_nodes
                 discretionary_power_nodes = temp_discretionary_power_nodes
-        temperature = temperature*0.9
+                eliminated_discretionary_power_nodes = temp_eliminated_discretionary_power_nodes    
+            else:
+                final_cost = calculate_acc(sa_solution_graph)+calculate_aoc(sa_solution_graph)    
+                #print("debug qui", final_cost)
+        temperature = temperature*0.95
+    final_cost = calculate_acc(sa_solution_graph)+calculate_aoc(sa_solution_graph)  
+    print("ended sa, cost:", final_cost)
     return sa_solution_graph
         
 
@@ -400,7 +456,7 @@ max_iterations_number = 100 #to be defined ...
 # _____________________ editable network parameters  ____________________________
 
 
-total_nodes_quantity = 20 #Total quantity of nodes composing the graph. At the moment for test purpose let this quantity be 10
+total_nodes_quantity = 60 #Total quantity of nodes composing the graph. At the moment for test purpose let this quantity be 10
 constrained_nodes_quantity = int(0.7*total_nodes_quantity)      #Total quantity of constrained nodes, all of them must be connected in the graph with just 1 arc for node.
 mandatory_power_nodes_quantity = int(0.2*(total_nodes_quantity))   #Quantity of mandatory nodes: that is, they must be included in the graph and each of them can have more then 1 arc.
 discretionary_power_nodes_quantity = total_nodes_quantity-constrained_nodes_quantity-mandatory_power_nodes_quantity #Quantity of power nodes that can be used for getting a better spanning tree but are not mandatory
@@ -436,6 +492,7 @@ initial_solution_graph, power_nodes_edges = generate_initial_solution(edited_net
 initial_solution = initial_solution_graph
 #draw_graph(initial_solution_graph)
 initial_cost = calculate_acc(initial_solution_graph)+calculate_aoc(initial_solution_graph)
+initial_average_latency = nx.average_shortest_path_length(initial_solution, weight="latency")
 """
 second_solution_graph, power_nodes_edges = eliminate_discretionary_power_node(network_graph, initial_solution_graph, power_nodes, discretionary_power_nodes, power_nodes_edges)
 draw_graph(second_solution_graph)
@@ -447,6 +504,7 @@ draw_graph(third_solution_graph)
 """
 simulated_annealing_solution = simulated_annealing(network_graph, initial_solution_graph, constrained_nodes, power_nodes, discretionary_power_nodes, power_nodes_edges)
 
-print("initial cost", initial_cost)
-print("cost of sa solution:", calculate_acc(simulated_annealing_solution)+calculate_aoc(simulated_annealing_solution))
+print("initial cost", initial_cost, "initial average latency: ", initial_average_latency)
+average_latency = nx.average_shortest_path_length(simulated_annealing_solution, weight="latency")
+print("cost of sa solution:", calculate_acc(simulated_annealing_solution)+calculate_aoc(simulated_annealing_solution), "average latency: ", average_latency)
 draw_graph(simulated_annealing_solution)
