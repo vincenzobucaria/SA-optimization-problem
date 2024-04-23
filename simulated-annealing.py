@@ -367,7 +367,7 @@ def change_reference_power_node(network_graph, graph, power_nodes, power_nodes_e
     return graph, power_nodes, power_nodes_edges, discretionary_power_nodes, eliminated_discretionary_power_nodes
 
 def simulated_annealing(network_graph, initial_solution_graph, constrained_nodes, power_nodes, discretionary_power_nodes, power_nodes_edges, initial_temperature=10, minimum_temperature=0.0001, max_iterations=1000):
-    k = 0.0001
+    k = 0.002
     sa_solution_graph = initial_solution_graph
     temporary_graph = initial_solution_graph
     temperature = initial_temperature
@@ -456,7 +456,7 @@ max_iterations_number = 100 #to be defined ...
 # _____________________ editable network parameters  ____________________________
 
 
-total_nodes_quantity = 60 #Total quantity of nodes composing the graph. At the moment for test purpose let this quantity be 10
+total_nodes_quantity = 35 #Total quantity of nodes composing the graph. At the moment for test purpose let this quantity be 10
 constrained_nodes_quantity = int(0.7*total_nodes_quantity)      #Total quantity of constrained nodes, all of them must be connected in the graph with just 1 arc for node.
 mandatory_power_nodes_quantity = int(0.2*(total_nodes_quantity))   #Quantity of mandatory nodes: that is, they must be included in the graph and each of them can have more then 1 arc.
 discretionary_power_nodes_quantity = total_nodes_quantity-constrained_nodes_quantity-mandatory_power_nodes_quantity #Quantity of power nodes that can be used for getting a better spanning tree but are not mandatory
